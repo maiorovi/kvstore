@@ -1,12 +1,17 @@
 package kvstore
 
-import akka.actor.{ OneForOneStrategy, Props, ActorRef, Actor }
+import java.util.concurrent.TimeUnit
+
+import akka.actor.{Actor, ActorRef, OneForOneStrategy, Props}
 import kvstore.Arbiter._
+
 import scala.collection.immutable.Queue
 import akka.actor.SupervisorStrategy.Restart
+
 import scala.annotation.tailrec
-import akka.pattern.{ ask, pipe }
+import akka.pattern.{ask, pipe}
 import akka.actor.Terminated
+
 import scala.concurrent.duration._
 import akka.actor.PoisonPill
 import akka.actor.OneForOneStrategy
@@ -47,6 +52,8 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   var replicators = Set.empty[ActorRef]
 
   var sequences = Map.empty[String, Int]
+  // task to replicator
+  var persistenceTasks = Map.empty[Int, (ActorRef, Persist)]
 
   arbiter ! Join
 
@@ -55,7 +62,14 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
   def receive = {
     case JoinedPrimary   => context.become(leader)
-    case JoinedSecondary => context.become(replica)
+    case JoinedSecondary =>
+      context.system.scheduler.schedule(FiniteDuration(0, TimeUnit.MILLISECONDS),
+        FiniteDuration(100, TimeUnit.MILLISECONDS), new Runnable {
+          override def run(): Unit = persistenceTasks.foreach(p => {
+            persister ! p._2._2
+          })
+        })
+      context.become(replica)
   }
 
   /* TODO Behavior for  the leader role. */
@@ -75,7 +89,9 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     case get: Get => handleGet(get)
     case snapshot: Snapshot => handleSnapshot(snapshot)
     case persisted: Persisted =>
-      replicators.foreach(r => r ! SnapshotAck(persisted.key, persisted.id))
+      val replicator = persistenceTasks(persisted.id.toInt)
+      persistenceTasks -= persisted.id.toInt
+      replicator._1 ! SnapshotAck(persisted.key, persisted.id)
     case _ =>
   }
 
@@ -96,7 +112,6 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     }
   }
 
-
   private def doHandleSnapshot(snapshot: Snapshot, seq: Int) : Unit = {
     val key = snapshot.key
     val snapshotSeq = snapshot.seq
@@ -104,11 +119,16 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     snapshot.valueOption match {
       case Some(value) => kv += (key -> value)
         sequences += (key -> (seq + 1))
-        persister ! Persist(key, Some(value), seq)
+        val persistMessage = Persist(key, Some(value), seq)
+        persister ! persistMessage
+        val tuple = (sender(), persistMessage)
+        persistenceTasks += (seq -> tuple)
       case None => kv = kv.-(key)
         sequences += (key -> (seq + 1))
-        persister ! Persist(key, None, seq)
-        replicators += sender()
+        val persistMessage = Persist(key, None, seq)
+        persister ! persistMessage
+        val tuple = (sender(), persistMessage)
+        persistenceTasks += (seq -> tuple)
     }
   }
 
