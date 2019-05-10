@@ -77,6 +77,7 @@ trait Step5_PrimaryPersistenceSpec
 
     arbiter.expectMsg(Join)
     arbiter.send(primary, JoinedPrimary)
+    println("fooo")
     arbiter.send(primary, Replicas(Set(primary, secondary.ref)))
 
     client.probe.within(1.second, 2.seconds) {

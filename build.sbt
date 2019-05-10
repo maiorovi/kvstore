@@ -27,6 +27,7 @@ libraryDependencies ++= Seq(
 
   // to be used slightly in followers example
   "com.typesafe.akka"        %% "akka-actor-typed"         % akkaVersion,
+  "org.scalatest" %% "scalatest" % "3.2.0-SNAP10" % Test,
 
   // Used by protocols assignment
   "org.fusesource.leveldbjni" % "leveldbjni-all"           % "1.8",

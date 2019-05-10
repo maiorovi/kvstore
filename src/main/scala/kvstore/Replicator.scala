@@ -49,6 +49,7 @@ class Replicator(val replica: ActorRef) extends Actor {
   /* TODO Behavior for the Replicator. */
   def receive: Receive = {
     case Replicate(key, value, id) =>
+      println(s">>>replicator $key = $value")
       val s = nextSeq()
       val pair = (sender(), Replicate(key, value, id));
       acks += (s -> pair)
@@ -56,6 +57,7 @@ class Replicator(val replica: ActorRef) extends Actor {
     case SnapshotAck(key, seq) =>
       val pair = acks(seq)
       acks -= seq
+      println(s">>>Snapshot $key")
       pair._1 ! Replicated(key, pair._2.id)
     case _ =>
   }
